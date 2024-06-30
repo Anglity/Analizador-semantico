@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analizador Semántico Mejorado</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 20px;
+            padding: 20px;
+        }
+        .section {
+            border: 2px solid #f0c000;
+            padding: 10px;
+            background-color: #f8e58a;
+        }
+        .section h2 {
+            margin-top: 0;
+        }
+        .code-section {
+            grid-column: span 2;
+        }
+        textarea {
+            width: 100%;
+            height: 150px;
+            font-family: monospace;
+            font-size: 16px;
+        }
+        button, input[type="file"] {
+            margin: 10px 0;
+            padding: 10px 20px;
+            font-size: 16px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        table, th, td {
+            border: 1px solid #ddd;
+        }
+        th, td {
+            padding: 8px;
+            text-align: left;
+        }
+        .error {
+            color: red;
+        }
+    </style>
+</head>
+<body>
+    <div class="section code-section">
+        <h2>Sección Código</h2>
+        <textarea id="codigoEntrada" placeholder="Escribe tu código aquí..."></textarea>
+        <input type="file" id="archivoEntrada" accept=".txt,.js,.html">
+        <button onclick="analizarCodigo()">Analizar</button>
+        <pre id="salida"></pre>
+    </div>
+
+    <div class="section">
+        <h2>Tabla de Símbolos</h2>
+        <table id="tablaSimbolos">
+            <thead>
+                <tr>
+                    <th>Línea</th>
+                    <th>Tipo de dato</th>
+                    <th>Variable</th>
+                    <th>Valor</th>
+                    <th>IDE</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
+
+    <div class="section">
+        <h2>Tabla de Tripletas</h2>
+        <table id="tablaTripletas">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Dato Objeto</th>
+                    <th>Dato Fuente</th>
+                    <th>Operador</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
+
+    <div class="section">
+        <h2>Tabla de Errores</h2>
+        <table id="tablaErrores">
+            <thead>
+                <tr>
+                    <th>Línea</th>
+                    <th>Error</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
+
+    <script>
+        // Lexer: Divide la entrada en tokens
+        function lexer(input) {
+            const tokens = input.match(/\d+|[a-zA-Z_]\w*|==|!=|<=|>=|&&|\|\||[+\-*/%=(){};]|int|if|else|while/g);
+            return tokens || [];
+        }
+
+        // Parser: Analizador sintáctico para expresiones aritméticas y lógicas
+        function parser(tokens) {
+            let posicion = 0;
+            let linea = 1;
+
+            function nextToken() {
+                if (tokens[posicion] === ';') {
+                    linea++;
+                }
+                return tokens[posicion++];
+            }
+
+            function parsePrimary() {
+                let token = nextToken();
+                if (/\d+/.test(token)) {
+                    return { type: 'Literal', value: Number(token), linea };
+                } else if (/[a-zA-Z_]\w*/.test(token)) {
+                    return { type: 'Identifier', name: token, linea };
+                } else if (token === '(') {
+                    const expr = parseExpression();
+                    if (tokens[posicion] === ')') {
+                        nextToken();
+                        return expr;
+                    } else {
+                        throw new Error("Se esperaba ')'");
+                    }
+                } else {
+                    throw new Error("Token inesperado: " + token);
+                }
+            }
+
+            function parseFactor() {
+                let node = parsePrimary();
+                while (tokens[posicion] === '*' || tokens[posicion] === '/' || tokens[posicion] === '%') {
+                    const operator = nextToken();
+                    node = { type: 'BinaryExpression', operator: operator, left: node, right: parsePrimary(), linea };
+                }
+                return node;
+            }
+
+            function parseTerm() {
+                let node = parseFactor();
+                while (tokens[posicion] === '+' || tokens[posicion] === '-') {
+                    const operator = nextToken();
+                    node = { type: 'BinaryExpression', operator: operator, left: node, right: parseFactor(), linea };
+                }
+                return node;
+            }
+
+            function parseComparison() {
+                let node = parseTerm();
+                while (tokens[posicion] === '==' || tokens[posicion] === '!=' || tokens[posicion] === '<' || tokens[posicion] === '>' || tokens[posicion] === '<=' || tokens[posicion] === '>=') {
+                    const operator = nextToken();
+                    node = { type: 'BinaryExpression', operator: operator, left: node, right: parseTerm(), linea };
+                }
+                return node;
+            }
+
+            function parseLogical() {
+                let node = parseComparison();
+                while (tokens[posicion] === '&&' || tokens[posicion] === '||') {
+                    const operator = nextToken();
+                    node = { type: 'LogicalExpression', operator: operator, left: node, right: parseComparison(), linea };
+                }
+                return node;
+            }
+
+            function parseExpression() {
+                return parseLogical();
+            }
+
+            function parseDeclaration() {
+                const token = nextToken();
+                if (token !== 'int') throw new Error("Se esperaba 'int' en la declaración de variable");
+                const identifier = nextToken();
+                if (!/[a-zA-Z_]\w*/.test(identifier)) throw new Error("Identificador inválido en la declaración de variable");
+                if (nextToken() !== '=') throw new Error("Se esperaba '=' en la declaración de variable");
+                const value = parseExpression();
+                if (nextToken() !== ';') throw new Error("Se esperaba ';' al final de la declaración de variable");
+                return { type: 'Declaration', identifier: { type: 'Identifier', name: identifier, linea }, value, linea };
+            }
+
+            function parseStatement() {
+                const token = tokens[posicion];
+                if (token === 'int') {
+                    return parseDeclaration();
+                } else {
+                    const expr = parseExpression();
+                    if (tokens[posicion] === '=') {
+                        nextToken();
+                        const value = parseExpression();
+                        if (tokens[posicion] === ';') {
+                            nextToken();
+                        }
+                        return { type: 'Assignment', identifier: expr, value: value, linea };
+                    } else {
+                        return expr;
+                    }
+                }
+            }
+
+            function parseProgram() {
+                const body = [];
+                while (posicion < tokens.length) {
+                    body.push(parseStatement());
+                }
+                return { type: 'Program', body: body };
+            }
+
+            return parseProgram();
+        }
+
+        // Analizador Semántico: Verifica reglas semánticas
+        function semanticAnalyzer(ast) {
+            const declaredVariables = new Map();
+            const tripletas = [];
+            const errores = [];
+
+            function visit(node) {
+                switch (node.type) {
+                    case 'Program':
+                        node.body.forEach(visit);
+                        break;
+                    case 'Declaration':
+                        if (declaredVariables.has(node.identifier.name)) {
+                            errores.push({ linea: node.linea, mensaje: "Variable redeclarada: " + node.identifier.name });
+                            break;
+                        }
+                        visit(node.value);
+                        declaredVariables.set(node.identifier.name, node.value);
+                        tripletas.push({ linea: node.linea, objeto: node.identifier.name, fuente: node.value, operador: '=' });
+                        break;
+                    case 'Assignment':
+                        if (node.identifier.type !== 'Identifier') {
+                            errores.push({ linea: node.linea, mensaje: "Lado izquierdo inválido en la asignación" });
+                            break;
+                        }
+                        if (!declaredVariables.has(node.identifier.name)) {
+                            errores.push({ linea: node.linea, mensaje: "Variable no declarada: " + node.identifier.name });
+                            break;
+                        }
+                        visit(node.value);
+                        declaredVariables.set(node.identifier.name, node.value);
+                        tripletas.push({ linea: node.linea, objeto: node.identifier.name, fuente: node.value, operador: '=' });
+                        break;
+                    case 'Identifier':
+                        if (!declaredVariables.has(node.name)) {
+                            errores.push({ linea: node.linea, mensaje: "Variable no declarada: " + node.name });
+                        }
+                        break;
+                    case 'Literal':
+                        break;
+                    case 'BinaryExpression':
+                        visit(node.left);
+                        visit(node.right);
+                        tripletas.push({ linea: node.linea, objeto: null, fuente: node.left, operador: node.operator });
+                        tripletas.push({ linea: node.linea, objeto: null, fuente: node.right, operador: node.operator });
+                        break;
+                    case 'LogicalExpression':
+                        visit(node.left);
+                        visit(node.right);
+                        tripletas.push({ linea: node.linea, objeto: null, fuente: node.left, operador: node.operator });
+                        tripletas.push({ linea: node.linea, objeto: null, fuente: node.right, operador: node.operator });
+                        break;
+                    default:
+                        throw new Error("Tipo de nodo desconocido: " + node.type);
+                }
+            }
+
+            visit(ast);
+
+            return { variables: Array.from(declaredVariables), tripletas, errores };
+        }
+
+        function actualizarTablaSimbolos(variables) {
+            const tbody = document.getElementById('tablaSimbolos').querySelector('tbody');
+            tbody.innerHTML = '';
+            variables.forEach((variable, index) => {
+                const row = tbody.insertRow();
+                row.insertCell().textContent = index + 1;
+                row.insertCell().textContent = 'int';
+                row.insertCell().textContent = variable[0];
+                row.insertCell().textContent = variable[1].value;
+                row.insertCell().textContent = 'IDE' + (index + 1).toString().padStart(2, '0');
+            });
+        }
+
+        function actualizarTablaTripletas(tripletas) {
+            const tbody = document.getElementById('tablaTripletas').querySelector('tbody');
+            tbody.innerHTML = '';
+            tripletas.forEach((tripleta, index) => {
+                const row = tbody.insertRow();
+                row.insertCell().textContent = index;
+                row.insertCell().textContent = tripleta.objeto || 'T' + index;
+                row.insertCell().textContent = tripleta.fuente ? tripleta.fuente.value || tripleta.fuente.name : '';
+                row.insertCell().textContent = tripleta.operador;
+            });
+        }
+
+        function actualizarTablaErrores(errores) {
+            const tbody = document.getElementById('tablaErrores').querySelector('tbody');
+            tbody.innerHTML = '';
+            errores.forEach(error => {
+                const row = tbody.insertRow();
+                row.insertCell().textContent = error.linea;
+                row.insertCell().textContent = error.mensaje;
+                row.classList.add('error');
+            });
+        }
+
+        function analizarCodigo() {
+            const input = document.getElementById('codigoEntrada').value;
+            const tokens = lexer(input);
+            let ast;
+            try {
+                ast = parser(tokens);
+                const resultado = semanticAnalyzer(ast);
+                actualizarTablaSimbolos(resultado.variables);
+                actualizarTablaTripletas(resultado.tripletas);
+                actualizarTablaErrores(resultado.errores);
+                if (resultado.errores.length === 0) {
+                    document.getElementById('salida').textContent = 'El código es semánticamente correcto';
+                } else {
+                    document.getElementById('salida').textContent = 'Se encontraron errores semánticos';
+                }
+            } catch (e) {
+                document.getElementById('salida').textContent = 'Error: ' + e.message;
+            }
+        }
+
+        document.getElementById('archivoEntrada').addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    document.getElementById('codigoEntrada').value = e.target.result;
+                };
+                reader.readAsText(file);
+            }
+        });
+    </script>
+</body>
+</html>
